@@ -3,7 +3,7 @@ const axios = require('axios');
 const cors = require('cors');
 
 const app = express();
-const PORT = 4000;
+const PORT = process.env.PORT || 4000;
 
 // Sử dụng CORS cho tất cả các request đến server của bạn
 app.use(cors());
@@ -19,10 +19,10 @@ const API_DOMAIN = 'https://phimapi.com';
  * Điều này đảm bảo trình phát video (FE) sẽ chỉ yêu cầu tài nguyên từ tên miền của bạn.
  * @param {string} m3u8Content - Nội dung gốc của file M3U8.
  * @param {string} baseUrl - URL cơ sở của file M3U8 gốc (ví dụ: https://s6.kkphimplayer6.com/...).
- * @param {string} serverBaseUrl - URL của server này (ví dụ: http://localhost:4000).
+ * @param {string} serverBaseUrl - URL của server này (auto-detected from request).
  * @returns {string} Nội dung M3U8 đã được chỉnh sửa.
  */
-function rewriteM3U8Content(m3u8Content, baseUrl, serverBaseUrl = 'http://localhost:4000') {
+function rewriteM3U8Content(m3u8Content, baseUrl, serverBaseUrl) {
     // Đảm bảo baseUrl kết thúc bằng dấu / để dễ dàng ghép chuỗi
     const base = baseUrl.endsWith('/') ? baseUrl : baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
 
@@ -69,6 +69,13 @@ app.get("/api/movie/stream", async (req, res) => {
 
     console.log('📺 [M3U8 Request]', originalM3U8Url);
 
+    // ✨ TỰ ĐỘNG DETECT SERVER URL TỪ REQUEST
+    const protocol = req.protocol; // http hoặc https
+    const host = req.get('host'); // localhost:4000 hoặc my-movies-be.onrender.com
+    const serverBaseUrl = `${protocol}://${host}`;
+    
+    console.log('🌐 Auto-detected server URL:', serverBaseUrl);
+
     try {
         // Yêu cầu Server-to-Server đến URL M3U8 gốc
         const response = await axios.get(originalM3U8Url, { 
@@ -86,7 +93,7 @@ app.get("/api/movie/stream", async (req, res) => {
         console.log(m3u8Content.substring(0, 300));
         
         // Viết lại nội dung để các segment .ts trỏ về proxy của chính server này
-        const rewrittenContent = rewriteM3U8Content(m3u8Content, originalM3U8Url);
+        const rewrittenContent = rewriteM3U8Content(m3u8Content, originalM3U8Url, serverBaseUrl);
 
         console.log('📝 Rewritten M3U8 content (first 300 chars):');
         console.log(rewrittenContent.substring(0, 300));
