@@ -60,74 +60,54 @@ function rewriteM3U8Content(m3u8Content, baseUrl, serverBaseUrl) {
 
 
 // --- 1. ENDPOINT PROXY CHO FILE M3U8 (MANIFEST) ---
-app.get("/api/movie/stream", async (req, res) => {
-    const originalM3U8Url = req.query.url; // Lấy URL M3U8 gốc từ Front-end
-
-    if (!originalM3U8Url) {
-        return res.status(400).json({ message: "M3U8 URL is required" });
+// Thay vì dùng req.protocol (có thể trả về 'http' trên Render)
+app.get('/api/movie/stream', async (req, res) => {
+  try {
+    const m3u8Url = req.query.url;
+    
+    if (!m3u8Url) {
+      return res.status(400).json({ error: 'URL parameter is required' });
     }
 
-    console.log('📺 [M3U8 Request]', originalM3U8Url);
+    console.log('📥 Fetching m3u8:', m3u8Url);
 
-    // ✨ TỰ ĐỘNG DETECT SERVER URL TỪ REQUEST
-    const protocol = req.protocol; // http hoặc https
-    const host = req.get('host'); // localhost:4000 hoặc my-movies-be.onrender.com
+    const response = await axios.get(m3u8Url, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': new URL(m3u8Url).origin
+      }
+    });
+
+    const m3u8Content = response.data;
+    const originalM3U8Url = m3u8Url;
+
+    // ✅ FIX: Kiểm tra nếu có header X-Forwarded-Proto thì dùng, không thì dùng req.protocol
+    // Render và các cloud platform thường set header này
+    const protocol = req.get('x-forwarded-proto') || req.protocol;
+    const host = req.get('host');
     const serverBaseUrl = `${protocol}://${host}`;
     
     console.log('🌐 Auto-detected server URL:', serverBaseUrl);
 
-    try {
-        // Yêu cầu Server-to-Server đến URL M3U8 gốc
-        const response = await axios.get(originalM3U8Url, { 
-            responseType: 'text',
-            timeout: 10000, // 10s timeout
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://player.phimapi.com/'
-            }
-        });
-        
-        const m3u8Content = response.data;
-        
-        console.log('📄 Original M3U8 content (first 300 chars):');
-        console.log(m3u8Content.substring(0, 300));
-        
-        // Viết lại nội dung để các segment .ts trỏ về proxy của chính server này
-        const rewrittenContent = rewriteM3U8Content(m3u8Content, originalM3U8Url, serverBaseUrl);
+    const rewrittenContent = rewriteM3U8Content(m3u8Content, originalM3U8Url, serverBaseUrl);
 
-        console.log('📝 Rewritten M3U8 content (first 300 chars):');
-        console.log(rewrittenContent.substring(0, 300));
+    res.set({
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache'
+    });
 
-        // Đặt CORS header (dù đã có middleware, vẫn nên chắc chắn)
-        res.setHeader('Access-Control-Allow-Origin', '*'); 
-        
-        // Set Content-Type phù hợp để trình duyệt hiểu đây là file M3U8
-        res.setHeader('Content-Type', 'application/x-mpegURL');
-        
-        // Cache control
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(rewrittenContent);
+    console.log('✅ M3U8 served successfully');
 
-        console.log('✅ [M3U8 Success]', originalM3U8Url);
-
-        // Gửi nội dung M3U8 đã được chỉnh sửa về Front-end
-        res.send(rewrittenContent);
-
-    } catch (error) {
-        console.error('❌ [M3U8 Error]', error.message);
-        console.error('   URL:', originalM3U8Url);
-        console.error('   Status:', error.response?.status);
-        
-        // Trả về thông tin chi tiết hơn
-        res.status(error.response?.status || 500).json({ 
-            message: 'Error fetching video manifest', 
-            detail: error.message,
-            url: originalM3U8Url,
-            status: error.response?.status,
-            suggestion: error.response?.status === 404 
-                ? 'Video link may have expired. Try refreshing the page or selecting another episode.'
-                : 'Unable to fetch video. Please try again later.'
-        });
-    }
+  } catch (error) {
+    console.error('❌ Error fetching m3u8:', error.message);
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to fetch m3u8',
+      details: error.message
+    });
+  }
 });
 
 
